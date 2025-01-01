@@ -1,0 +1,135 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import scipy.stats as stats
+
+X0 = 0.89  # cm
+IE_LOSS = 0.0102  # GeV/cm
+DEPTH = 25  # cm
+N_EVENTS = 1000
+N_PLANES = 250
+dx = DEPTH / N_PLANES
+REST_E_ELECTRON = 5e-4 #GeV
+
+plane_positions = np.linspace(0, DEPTH, N_PLANES)
+
+# Photon class
+class Photon:
+    def __init__(self, energy, position=0.0):
+        self.energy = energy  # in GeV
+        self.position = position  # in cm
+
+    def pair_production(self):
+        """Simulate pair production."""
+        if self.energy > 2*REST_E_ELECTRON:
+            fraction = np.random.uniform()
+            e_plus = SecondaryChargedParticle(self.energy * fraction, self.position)
+            e_minus = SecondaryChargedParticle(self.energy * (1 - fraction), self.position)
+            return e_plus, e_minus
+        return None, None
+
+# Base class for Charged Particles
+class ChargedParticle:
+    def __init__(self, energy, position=0.0):
+        self.energy = energy  # in GeV
+        self.position = position  # in cm
+
+    def ionization_loss(self, distance, loss_per_cm):
+        """Simulate ionization energy loss over a given distance."""
+        delta_E = distance * loss_per_cm
+        self.energy = max(self.energy - delta_E, REST_E_ELECTRON)  # Energy cannot be negative
+
+    def bremsstrahlung(self):
+        """Simulate bremsstrahlung."""
+        if self.energy > REST_E_ELECTRON:
+            photon_energy = self.energy / 2
+            self.energy /= 2
+            return Photon(photon_energy, self.position)
+        return None
+
+# Subclass for Incident Charged Particles
+class IncidentChargedParticle(ChargedParticle):
+    def __init__(self, energy, position=0.0):
+        super().__init__(energy, position)
+
+# Subclass for Secondary Charged Particles
+class SecondaryChargedParticle(ChargedParticle):
+    def __init__(self, energy, position=0.0):
+        super().__init__(energy, position)
+
+# Function to run simulation for a given initial energy
+def run_simulation(E0):
+    charged_particles_non_incident = np.zeros(N_PLANES)
+    photon_particles = np.zeros(N_PLANES)
+
+    for _ in range(N_EVENTS):
+        # Start with an initial electron (primary electron)
+        electron = IncidentChargedParticle(E0)
+
+        # Queue to track particles propagating through the calorimeter
+        particle_queue = [electron]
+
+        while particle_queue:
+            particle = particle_queue.pop(0)  # Get the next particle to propagate
+
+            if particle.energy <= REST_E_ELECTRON:
+                continue
+
+            if isinstance(particle, ChargedParticle):
+                # Charged particle propagation
+                step = np.random.exponential(X0)
+                particle.position += step
+
+                if particle.position > DEPTH:
+                    continue
+
+                particle.ionization_loss(step, IE_LOSS)
+
+                # If the particle undergoes bremsstrahlung, add the resulting photon
+                photon = particle.bremsstrahlung()
+                if photon:
+                    particle_queue.append(SecondaryChargedParticle(particle.energy, particle.position))
+                    particle_queue.append(photon)
+
+            elif isinstance(particle, Photon):
+                # Photon propagation
+                step = np.random.exponential((9 / 7) * X0)
+                particle.position += step
+
+                if particle.position > DEPTH:
+                    continue
+
+                e_plus, e_minus = particle.pair_production()
+                if e_plus and e_minus:
+                    particle_queue.extend([e_plus, e_minus])
+
+            if particle.position <= DEPTH:
+                bin_index_start = np.searchsorted(plane_positions, particle.position - step)
+                bin_index_end = np.searchsorted(plane_positions, particle.position)
+                
+                if isinstance(particle, SecondaryChargedParticle) and bin_index_end < len(charged_particles_non_incident):
+                    charged_particles_non_incident[bin_index_start:bin_index_end] += 1
+                
+                elif isinstance(particle, Photon) and bin_index_end < len(photon_particles):
+                    photon_particles[bin_index_start:bin_index_end] += 1
+
+    density = charged_particles_non_incident / (dx * N_EVENTS)
+    photon_density = photon_particles / (dx * N_EVENTS)
+
+    return density, photon_density
+
+# Array of initial energies
+E0_values = [1, 3, 5, 10]  # GeV
+
+# Run simulation for each energy and plot results
+plt.figure(figsize=(10, 6))
+for E0 in E0_values:
+    density, photon_density = run_simulation(E0)
+    plt.plot(plane_positions, density, label=f"Charged particles (E0 = {E0} GeV)")
+
+plt.xlabel("Depth in Calorimeter (cm)")
+plt.ylabel(f"Average Density ($cm^{-1}$)")
+plt.title("Average Density for Various Initial Energies")
+plt.legend()
+plt.grid()
+plt.savefig("average_density_vs_energy.png")
+plt.show()
