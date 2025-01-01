@@ -133,3 +133,47 @@ plt.legend()
 plt.grid()
 plt.savefig("average_density_vs_energy.png")
 plt.show()
+
+def derivative_model(t, a, b, Energy):
+    numerator = ((b * t) ** (a - 1)) * np.exp(-b * t)
+    denominator = gamma(a)
+    prefactor = (Energy) * b
+    return prefactor * numerator / denominator
+
+def fit_parameters(E0_index, plane_positions, normalized_density, Energy):
+    t = plane_positions / X0
+    observed_density = normalized_density[E0_index]
+    initial_guesses = [8, 1]
+
+    popt, cov = curve_fit(lambda t, a, b: derivative_model(t, a, b, Energy[E0_index]),
+                        t, observed_density, p0=initial_guesses, bounds=([1.01, 0], [15, 2]), maxfev = 100000)
+
+    a_fit, b_fit = popt
+    return a_fit, b_fit, cov
+
+total_particles_1GeV = np.sum(densities[0]*dx*N_EVENTS) * dx
+normalized_density = np.array(densities)*dx*N_EVENTS / total_particles_1GeV
+
+fitted_params = []
+errors = []
+for i in range(len(E0_values)):
+    a_fit, b_fit, cov = fit_parameters(i, plane_positions, normalized_density, E0_values)
+    fitted_params.append((a_fit, b_fit))
+    errors.append(np.sqrt(np.diag(cov)))
+    print(f"Fitted parameters for E0 = {E0_values[i]} GeV: a = {a_fit:.4f} ± {errors[-1][0]:.4f}, b = {b_fit:.4f} ± {errors[-1][1]:.4f}")
+
+for i in range(len(E0_values)):
+    # Plot the original data
+    plt.plot(plane_positions/X0, normalized_density[i], label=f"Data E0 = {E0_values[i]} GeV")
+
+    # Plot the fitted curve
+    fitted_curve = derivative_model(plane_positions/X0, a = fitted_params[i][0], b = fitted_params[i][1], Energy = E0_values[i])
+    plt.plot(plane_positions/X0, fitted_curve, '--', label=f"Fit E0 = {E0_values[i]} GeV")
+
+plt.xlabel('Number of Radiation Lengths')
+plt.ylabel('Energy Density (GeV)')
+plt.title('Energy Density vs Number of Radiation Lengths')
+plt.legend()
+plt.grid(True)
+plt.savefig("energy_density_vs_number_of_radiation_lengths.png")
+plt.show()
